@@ -88,6 +88,31 @@ class CustomAccuracyMetric(Metric):
         engine.add_event_handler(Events.ITERATION_COMPLETED, self.completed, name)
 
 
+class EpochIteratation(Metric):
+
+    required_output_keys = ()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def update(self, output):
+        self._iteration += 1
+
+    def reset(self):
+        self._iteration = 0
+
+    def compute(self):
+        return self._iteration
+
+    def attach(self, engine, name, _usage=None):
+        # restart every epoch
+        engine.add_event_handler(Events.EPOCH_STARTED, self.started)
+        # compute metric
+        engine.add_event_handler(Events.ITERATION_COMPLETED, self.iteration_completed)
+        # apply metric
+        engine.add_event_handler(Events.ITERATION_COMPLETED, self.completed, name)
+
+
 def build_model(args, context):
     num_classes = context['num_classes']
     model_config = json.loads(args.model_config)
@@ -122,15 +147,17 @@ def main(args):
         images_folder=train_data_config['images_folder'],
         transform=transform)
     train_loader = torch.utils.data.DataLoader(train_dataset,
-        batch_size=train_data_config.get('batch_size', 128),
+        batch_size=train_data_config.get('batch_size', 10),
         shuffle=True,
         num_workers=train_data_config.get('num_workers', 4))
+
+    train_config = json.loads(args.train_config)
 
     context = {}
     context['num_classes'] = 120
     context['device'] = device
     model = build_model(args, context).to(device)
-    opt = optim.Adam(model.parameters(), lr=0.002)
+    opt = optim.Adam(model.parameters(), lr=train_config.get('lr', 0.002))
 
     def train_step(engine, batch):
         model.train()
@@ -163,8 +190,9 @@ def main(args):
     @trainer.on(Events.EPOCH_COMPLETED)
     @trainer.on(Events.ITERATION_COMPLETED(every=10))
     def log_trn_loss(engine):
-        log_msg = f"training epoch: {engine.state.epoch}"
-        log_msg += f" | training iteration: {engine.state.iteration} / {engine.state.epoch_length}"
+        log_msg = f"[train] epoch: {engine.state.epoch}"
+        log_msg += f" | epoch iteration: {engine.state.metrics['trn_epoch_iteration']} / {engine.state.epoch_length}"
+        log_msg += f" | total iteration: {engine.state.iteration}"
         log_msg += f" | loss: {engine.state.metrics['trn_loss']:.3f}"
         log_msg += f" | accuracy: {engine.state.metrics['trn_accuracy']:.3f}"
         print(log_msg)
@@ -173,17 +201,66 @@ def main(args):
     def run_dev_eval(engine):
         print('run_dev_eval ')
 
+    # Get experiment directory.
+    root = './runs'
+    try:
+        os.system('mkdir -p {}'.format(root))
+    except:
+        pass
+    where_experiment = os.path.join(root, str(len(list(os.listdir(root)))))
+    print('Experiment directory = {}'.format(where_experiment))
+
+    to_save = {'model': model}
+
+    # Save model every epoch.
+    handler = ModelCheckpoint(
+        where_experiment,
+        'latest',
+        n_saved=1,
+        create_dir=True,
+        score_name='epoch',
+        score_function=lambda x: trainer.state.epoch,
+        require_empty=False,
+    )
+    trainer.add_event_handler(Events.EPOCH_COMPLETED, handler, to_save)
+
+    # Save model every few iterations.
+    save_iteration_handler = ModelCheckpoint(
+        where_experiment,
+        'latest',
+        n_saved=1,
+        create_dir=True,
+        score_name='iteration',
+        score_function=lambda x: trainer.state.iteration,
+        require_empty=False,
+    )
+
+    @trainer.on(Events.ITERATION_COMPLETED(every=train_config.get('save_every_iteration', 20)))
+    def func(engine):
+        epoch_iteration = engine.state.metrics['trn_epoch_iteration']
+        epoch_length = engine.state.epoch_length
+
+        log_msg = f"[train] epoch: {engine.state.epoch}"
+        log_msg += f" | epoch iteration: {engine.state.metrics['trn_epoch_iteration']} / {engine.state.epoch_length}"
+        log_msg += f" | total iteration: {engine.state.iteration}"
+        log_msg += f" | saving model"
+        print(log_msg)
+
+        save_iteration_handler(engine, to_save)
+
     pbar = ProgressBar()
     pbar.attach(trainer)
 
     RunningAverage(output_transform=lambda out: out['loss']).attach(trainer, 'trn_loss')
     CustomAccuracyMetric(output_transform=lambda out: out).attach(trainer, 'trn_accuracy')
+    EpochIteratation(output_transform=lambda out: out).attach(trainer, 'trn_epoch_iteration')
 
     trainer.run(train_loader, max_epochs=5)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--train_config', default=json.dumps(dict()), type=str)
     parser.add_argument('--model_config', default=json.dumps(dict(name='net')), type=str)
     parser.add_argument('--train_data_config', default=json.dumps(dict(metadata_path='./data/train_list.mat', images_folder='./data/Images')), type=str)
     parser.add_argument('--test_data_config', default=json.dumps(dict(metadata_path='./data/test_list.mat', images_folder='./data/Images')), type=str)
