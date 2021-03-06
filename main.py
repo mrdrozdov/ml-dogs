@@ -187,7 +187,7 @@ if __name__ == '__main__':
     parser.add_argument('--train_data_config', default=json.dumps(dict(metadata_path='./data/train_list.mat', images_folder='./data/Images')), type=str)
     parser.add_argument('--test_data_config', default=json.dumps(dict(metadata_path='./data/test_list.mat', images_folder='./data/Images')), type=str)
     parser.add_argument('--seed', default=11, type=int)
-    parser.add_argument('--cuda', action='store_true', default=False, help='Option to use CUDA.')
+    parser.add_argument('--cuda', action='store_true', help='Option to use CUDA.')
     args = parser.parse_args()
 
     print(args)
