@@ -4,7 +4,7 @@ import torch.nn as nn
 
 class Net(nn.Module):
     def __init__(self, num_classes=10):
-        super(Net, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(3, 16, 5, 3)
         self.conv2 = nn.Conv2d(16, 32, 3, 1)
         self.conv3 = nn.Conv2d(32, 32, 3, 1)

@@ -147,7 +147,7 @@ def main(args):
         images_folder=train_data_config['images_folder'],
         transform=transform)
     train_loader = torch.utils.data.DataLoader(train_dataset,
-        batch_size=train_data_config.get('batch_size', 10),
+        batch_size=train_data_config.get('batch_size', 16),
         shuffle=True,
         num_workers=train_data_config.get('num_workers', 4))
 
