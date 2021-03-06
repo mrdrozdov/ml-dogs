@@ -325,7 +325,7 @@ def main(args):
     CustomAccuracyMetric(output_transform=lambda out: out).attach(trainer, 'trn_accuracy')
     EpochIteratation(output_transform=lambda out: out).attach(trainer, 'trn_epoch_iteration')
 
-    trainer.run(train_loader, max_epochs=5)
+    trainer.run(train_loader, max_epochs=train_config.get('max_epochs', 5))
 
 
 if __name__ == '__main__':
