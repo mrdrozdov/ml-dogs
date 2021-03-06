@@ -22,8 +22,6 @@ from ignite.metrics import Metric, RunningAverage
 default_train_config = {
     'lr': 0.002,
     'max_epochs': 5,
-    'log_every_iteration': 10,
-    'save_every_iteration': 10,
 }
 
 
@@ -227,7 +225,6 @@ def main(args):
         print('Training started!')
 
     @trainer.on(Events.EPOCH_COMPLETED)
-    @trainer.on(Events.ITERATION_COMPLETED(every=train_config['log_every_iteration']))
     def log_train(engine):
         log_msg = f"[train] epoch: {engine.state.epoch}"
         log_msg += f" | epoch iteration: {engine.state.metrics['trn_epoch_iteration']} / {engine.state.epoch_length}"
@@ -302,30 +299,6 @@ def main(args):
         require_empty=False,
     )
     trainer.add_event_handler(Events.EPOCH_COMPLETED, handler, to_save)
-
-    # Save model every few iterations.
-    save_iteration_handler = ModelCheckpoint(
-        where_experiment,
-        'latest',
-        n_saved=1,
-        create_dir=True,
-        score_name='iteration',
-        score_function=lambda x: trainer.state.iteration,
-        require_empty=False,
-    )
-
-    @trainer.on(Events.ITERATION_COMPLETED(every=train_config['save_every_iteration']))
-    def save_model_every_iteration(engine):
-        epoch_iteration = engine.state.metrics['trn_epoch_iteration']
-        epoch_length = engine.state.epoch_length
-
-        # log_msg = f"[train] epoch: {engine.state.epoch}"
-        # log_msg += f" | epoch iteration: {engine.state.metrics['trn_epoch_iteration']} / {engine.state.epoch_length}"
-        # log_msg += f" | total iteration: {engine.state.iteration}"
-        # log_msg += f" | saving model"
-        # print(log_msg)
-
-        save_iteration_handler(engine, to_save)
 
     pbar = ProgressBar(disable=not args.progress)
     pbar.attach(trainer)
