@@ -164,6 +164,7 @@ def main(args):
     @trainer.on(Events.ITERATION_COMPLETED(every=10))
     def log_trn_loss(engine):
         log_msg = f"training epoch: {engine.state.epoch}"
+        log_msg += f" | training iteration: {engine.state.iteration} / {engine.state.epoch_length}"
         log_msg += f" | loss: {engine.state.metrics['trn_loss']:.3f}"
         log_msg += f" | accuracy: {engine.state.metrics['trn_accuracy']:.3f}"
         print(log_msg)
