@@ -10,6 +10,11 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 
+from ignite.contrib.handlers import ProgressBar
+from ignite.engine import Engine, Events
+from ignite.handlers import ModelCheckpoint, global_step_from_engine
+from ignite.metrics import RunningAverage
+
 
 class CustomDataset(torch.utils.data.Dataset):
 
@@ -72,8 +77,33 @@ def main(args):
         shuffle=True,
         num_workers=train_data_config.get('num_workers', 4))
 
-    for images, labels in tqdm(train_loader, desc='train'):
+    def train_step(engine, batch):
+        images, labels = batch
+        return 0
+
+    trainer = Engine(train_step)
+
+    @trainer.on(Events.STARTED)
+    def update(engine):
+        print('training started!')
+
+    @trainer.on(Events.ITERATION_COMPLETED(every=1))
+    def update(engine):
         pass
+
+    @trainer.on(Events.EPOCH_COMPLETED)
+    def log_trn_loss(engine):
+        print('log_trn_loss')
+
+    @trainer.on(Events.EPOCH_COMPLETED)
+    def run_dev_eval(engine):
+        print('run_dev_eval ')
+
+    pbar = ProgressBar()
+    pbar.attach(trainer)
+
+    trainer.run(train_loader, max_epochs=5)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
