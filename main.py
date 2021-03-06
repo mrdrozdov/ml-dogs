@@ -18,6 +18,8 @@ from ignite.engine import Engine, Events
 from ignite.handlers import ModelCheckpoint, global_step_from_engine
 from ignite.metrics import Metric, RunningAverage
 
+MEAN_IMAGENET = [0.485, 0.456, 0.406]
+STD_IMAGENET  = [0.229, 0.224, 0.225]
 
 class CustomDataset(torch.utils.data.Dataset):
 
@@ -137,6 +139,7 @@ def main(args):
     transform = transforms.Compose([
         transforms.RandomResizedCrop(224, ratio=(1, 1.3)),
         transforms.ToTensor(),
+        transforms.Normalize(MEAN_IMAGENET, STD_IMAGENET)
         ])
 
     train_data_config = json.loads(args.train_data_config)
