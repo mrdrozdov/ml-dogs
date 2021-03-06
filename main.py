@@ -89,6 +89,9 @@ class Net(nn.Module):
 def main(args):
     torch.random.manual_seed(args.seed)
 
+    args.cuda = not args.no_cuda and torch.cuda.is_available()
+    args.device = torch.device("cuda" if args.cuda else "cpu")
+
     transform = transforms.Compose([
         transforms.RandomResizedCrop(224, ratio=(1, 1.3)),
         transforms.ToTensor(),
@@ -106,12 +109,14 @@ def main(args):
         shuffle=True,
         num_workers=train_data_config.get('num_workers', 4))
 
-    model = Net(num_classes=120)
+    model = Net(num_classes=120).to(args.device)
     opt = optim.Adam(model.parameters(), lr=0.002)
 
     def train_step(engine, batch):
         model.train()
         images, labels = batch
+        images = images.to(args.device)
+        labels = labels.to(args.device)
         logits = model(images)
         loss = nn.CrossEntropyLoss()(logits, labels)
 
@@ -161,6 +166,7 @@ if __name__ == '__main__':
     parser.add_argument('--train_data_config', default=json.dumps(dict(metadata_path='./data/train_list.mat', images_folder='./data/Images')), type=str)
     parser.add_argument('--test_data_config', default=json.dumps(dict(metadata_path='./data/test_list.mat', images_folder='./data/Images')), type=str)
     parser.add_argument('--seed', default=11, type=int)
+    parser.add_argument('--no_cuda', action='store_true', default=False, help='Option to restrict CUDA.')
     args = parser.parse_args()
 
     print(args)
