@@ -1,4 +1,5 @@
 import argparse
+import importlib
 import json
 import os
 import sys
@@ -87,31 +88,20 @@ class CustomAccuracyMetric(Metric):
         engine.add_event_handler(Events.ITERATION_COMPLETED, self.completed, name)
 
 
-class Net(nn.Module):
-    def __init__(self, num_classes=10):
-        super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(3, 16, 5, 3)
-        self.conv2 = nn.Conv2d(16, 32, 3, 1)
-        self.conv3 = nn.Conv2d(32, 32, 3, 1)
-        self.fc1 = nn.Linear(9248, 256)
-        self.fc2 = nn.Linear(256, num_classes)
+def build_model(args, context):
+    num_classes = context['num_classes']
+    model_config = json.loads(args.model_config)
 
-    def forward(self, x):
-        x = self.conv1(x)
-        x = torch.relu(x)
-        x = self.conv2(x)
-        x = torch.relu(x)
-        x = torch.max_pool2d(x, 2)
-        x = self.conv3(x)
-        x = torch.relu(x)
-        x = torch.max_pool2d(x, 2)
-        x = torch.flatten(x, 1)
-        x = self.fc1(x)
-        x = torch.relu(x)
-        x = self.fc2(x)
-        # output = F.log_softmax(x, dim=1)
-        output = x
-        return output
+    name = model_config['name']
+    del model_config['name']
+    kwargs = model_config
+    kwargs['num_classes'] = num_classes
+
+    module = importlib.import_module('model_{}'.format(name))
+    class_ = getattr(module, 'model_class_name')
+    model = class_(**kwargs)
+
+    return model
 
 
 def main(args):
@@ -136,7 +126,10 @@ def main(args):
         shuffle=True,
         num_workers=train_data_config.get('num_workers', 4))
 
-    model = Net(num_classes=120).to(device)
+    context = {}
+    context['num_classes'] = 120
+    context['device'] = device
+    model = build_model(args, context).to(device)
     opt = optim.Adam(model.parameters(), lr=0.002)
 
     def train_step(engine, batch):
@@ -190,6 +183,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--model_config', default=json.dumps(dict(name='net')), type=str)
     parser.add_argument('--train_data_config', default=json.dumps(dict(metadata_path='./data/train_list.mat', images_folder='./data/Images')), type=str)
     parser.add_argument('--test_data_config', default=json.dumps(dict(metadata_path='./data/test_list.mat', images_folder='./data/Images')), type=str)
     parser.add_argument('--seed', default=11, type=int)
