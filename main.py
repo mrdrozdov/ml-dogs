@@ -18,8 +18,6 @@ from ignite.engine import Engine, Events
 from ignite.handlers import ModelCheckpoint, global_step_from_engine
 from ignite.metrics import Metric, RunningAverage
 
-MEAN_IMAGENET = [0.485, 0.456, 0.406]
-STD_IMAGENET  = [0.229, 0.224, 0.225]
 
 class CustomDataset(torch.utils.data.Dataset):
 
@@ -139,7 +137,7 @@ def main(args):
     transform = transforms.Compose([
         transforms.RandomResizedCrop(224, ratio=(1, 1.3)),
         transforms.ToTensor(),
-        transforms.Normalize(MEAN_IMAGENET, STD_IMAGENET)
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ])
 
     train_data_config = json.loads(args.train_data_config)
@@ -153,6 +151,15 @@ def main(args):
         batch_size=train_data_config.get('batch_size', 16),
         shuffle=True,
         num_workers=train_data_config.get('num_workers', 4))
+
+    test_dataset = CustomDataset(
+        metadata_path=test_data_config['metadata_path'],
+        images_folder=test_data_config['images_folder'],
+        transform=transform)
+    test_loader = torch.utils.data.DataLoader(test_dataset,
+        batch_size=test_data_config.get('batch_size', 16),
+        shuffle=False,
+        num_workers=test_data_config.get('num_workers', 4))
 
     train_config = json.loads(args.train_config)
 
@@ -184,15 +191,35 @@ def main(args):
 
         return out
 
+    @torch.no_grad()
+    def eval_step(engine, batch):
+        model.eval()
+        images, labels = batch
+        images = images.to(device)
+        labels = labels.to(device)
+        logits = model(images)
+        loss = nn.CrossEntropyLoss()(logits, labels)
+
+        correct = (logits.max(-1)[1] == labels).sum().item()
+        total = labels.shape[-1]
+
+        out = {}
+        out['loss'] = loss.item()
+        out['correct'] = correct
+        out['total'] = total
+
+        return out
+
     trainer = Engine(train_step)
+    evaluator = Engine(eval_step)
 
     @trainer.on(Events.STARTED)
-    def update(engine):
-        print('training started!')
+    def start_training(engine):
+        print('Training started!')
 
     @trainer.on(Events.EPOCH_COMPLETED)
     @trainer.on(Events.ITERATION_COMPLETED(every=10))
-    def log_trn_loss(engine):
+    def log_train(engine):
         log_msg = f"[train] epoch: {engine.state.epoch}"
         log_msg += f" | epoch iteration: {engine.state.metrics['trn_epoch_iteration']} / {engine.state.epoch_length}"
         log_msg += f" | total iteration: {engine.state.iteration}"
@@ -201,8 +228,48 @@ def main(args):
         print(log_msg)
 
     @trainer.on(Events.EPOCH_COMPLETED)
-    def run_dev_eval(engine):
-        print('run_dev_eval ')
+    def run_eval(engine):
+        outputs = []
+
+        for batch in tqdm(test_loader, desc='Eval', disable=not args.progress):
+            images, labels = batch
+            images = images.to(device)
+            labels = labels.to(device)
+            logits = model(images)
+            loss = nn.CrossEntropyLoss()(logits, labels)
+
+            correct = (logits.max(-1)[1] == labels).sum().item()
+            total = labels.shape[-1]
+
+            out = {}
+            out['loss'] = loss.item()
+            out['correct'] = correct
+            out['total'] = total
+
+            outputs.append(out)
+
+        def _avg(outputs, key):
+            vals = []
+            for x in outputs:
+                vals += [x[key]] * x['total']
+            return torch.mean(torch.tensor(vals, dtype=torch.float)).item()
+
+        correct = sum([x['correct'] for x in outputs])
+        total = sum([x['total'] for x in outputs])
+        accuracy = correct / total
+        loss = _avg(outputs, 'loss')
+
+        engine.state.metrics['eval_loss'] = loss
+        engine.state.metrics['eval_accuracy'] = accuracy
+
+    @trainer.on(Events.EPOCH_COMPLETED)
+    def log_eval(engine):
+        log_msg = f"[eval] epoch: {engine.state.epoch}"
+        log_msg += f" | epoch iteration: {engine.state.metrics['trn_epoch_iteration']} / {engine.state.epoch_length}"
+        log_msg += f" | total iteration: {engine.state.iteration}"
+        log_msg += f" | loss: {engine.state.metrics['eval_loss']:.3f}"
+        log_msg += f" | accuracy: {engine.state.metrics['eval_accuracy']:.3f}"
+        print(log_msg)
 
     # Get experiment directory.
     root = './runs'
@@ -251,7 +318,7 @@ def main(args):
 
         save_iteration_handler(engine, to_save)
 
-    pbar = ProgressBar()
+    pbar = ProgressBar(disable=not args.progress)
     pbar.attach(trainer)
 
     RunningAverage(output_transform=lambda out: out['loss']).attach(trainer, 'trn_loss')
@@ -268,7 +335,8 @@ if __name__ == '__main__':
     parser.add_argument('--train_data_config', default=json.dumps(dict(metadata_path='./data/train_list.mat', images_folder='./data/Images')), type=str)
     parser.add_argument('--test_data_config', default=json.dumps(dict(metadata_path='./data/test_list.mat', images_folder='./data/Images')), type=str)
     parser.add_argument('--seed', default=11, type=int)
-    parser.add_argument('--cuda', action='store_true', help='Option to use CUDA.')
+    parser.add_argument('--cuda', action='store_true', help='If True, run on GPU.')
+    parser.add_argument('--progress', action='store_true', help='If True, show progress bar.')
     args = parser.parse_args()
 
     print(args)
