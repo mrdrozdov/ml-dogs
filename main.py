@@ -4,8 +4,6 @@ import json
 import os
 import sys
 
-import PIL
-import scipy.io
 from tqdm import tqdm
 import torch
 import torch.nn as nn
@@ -16,128 +14,11 @@ import torchvision.transforms as transforms
 from ignite.contrib.handlers import ProgressBar
 from ignite.engine import Engine, Events
 from ignite.handlers import ModelCheckpoint, global_step_from_engine
-from ignite.metrics import Metric, RunningAverage
+from ignite.metrics import RunningAverage
 
-
-default_train_config = {
-    'lr': 0.002,
-    'max_epochs': 5,
-}
-
-
-default_model_config = {
-    'name': 'net',
-}
-
-
-default_train_data_config = {
-    'batch_size': 16,
-    'num_workers': 4,
-    'metadata_path': './data/train_list.mat',
-    'images_folder': './data/Images',
-}
-
-
-default_eval_data_config = {
-    'batch_size': 16,
-    'num_workers': 4,
-    'metadata_path': './data/test_list.mat',
-    'images_folder': './data/Images',
-}
-
-
-class CustomDataset(torch.utils.data.Dataset):
-
-    def __init__(self, metadata_path=None, images_folder=None, transform=None, target_transform=None):
-        self.images_folder = images_folder
-        self.transform = transform
-        self.target_transform = target_transform
-
-        filenames, labels = self.get_filenames_and_labels(metadata_path)
-
-        self.filenames = filenames
-        self.labels = labels
-
-    def __len__(self):
-        return len(self.labels)
-
-    def __getitem__(self, index):
-        image_name = self.filenames[index]
-        image_path = os.path.join(self.images_folder, image_name)
-        image = PIL.Image.open(image_path).convert('RGB')
-
-        if self.transform:
-            image = self.transform(image)
-
-        label = self.labels[index]
-
-        if self.target_transform:
-            label = self.target_transform(label)
-
-        return image, label
-
-    def get_filenames_and_labels(self, metadata_path):
-        annotations = scipy.io.loadmat(metadata_path)
-        filenames = [x[0][0] + '.jpg' for x in annotations['annotation_list']]
-        labels = [x[0] - 1 for x in annotations['labels']]
-
-        assert min(labels) == 0
-        assert len(set(labels)) == max(labels) + 1
-
-        return filenames, labels
-
-
-class CustomAccuracyMetric(Metric):
-
-    required_output_keys = ('correct', 'total')
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def update(self, output):
-        correct, total = output
-        self._correct += correct
-        self._total += total
-
-    def reset(self):
-        self._correct = 0
-        self._total = 0
-
-    def compute(self):
-        return self._correct / self._total
-
-    def attach(self, engine, name, _usage=None):
-        # restart every epoch
-        engine.add_event_handler(Events.EPOCH_STARTED, self.started)
-        # compute metric
-        engine.add_event_handler(Events.ITERATION_COMPLETED, self.iteration_completed)
-        # apply metric
-        engine.add_event_handler(Events.ITERATION_COMPLETED, self.completed, name)
-
-
-class EpochIteratation(Metric):
-
-    required_output_keys = ()
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def update(self, output):
-        self._iteration += 1
-
-    def reset(self):
-        self._iteration = 0
-
-    def compute(self):
-        return self._iteration
-
-    def attach(self, engine, name, _usage=None):
-        # restart every epoch
-        engine.add_event_handler(Events.EPOCH_STARTED, self.started)
-        # compute metric
-        engine.add_event_handler(Events.ITERATION_COMPLETED, self.iteration_completed)
-        # apply metric
-        engine.add_event_handler(Events.ITERATION_COMPLETED, self.completed, name)
+from data import *
+from ignite_additions import *
+from presets import *
 
 
 def build_model(args, context):
