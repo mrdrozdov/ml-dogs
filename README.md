@@ -11,8 +11,8 @@ Install dependencies.
 - Install pytorch using instructions here: https://pytorch.org/
 
 ```
+pip install pytorch-ignite
 pip install scipy
-pip install torch-ignite
 pip install tqdm
 ```
 
