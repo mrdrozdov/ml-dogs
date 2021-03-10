@@ -11,6 +11,18 @@ import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
 
+# Support for half precision.
+try:
+    from torch.cuda.amp import autocast
+    autocast_available = True
+except ImportError:
+    class autocast:
+        def __init__(self, enabled=True): pass
+        def __enter__(self): return self
+        def __exit__(self, exc_type, exc_value, exc_traceback): pass
+    autocast_available = False
+from torch.cuda.amp.grad_scaler import GradScaler
+
 from ignite.contrib.handlers import ProgressBar
 from ignite.engine import Engine, Events
 from ignite.handlers import ModelCheckpoint, global_step_from_engine
@@ -41,6 +53,9 @@ def main(args):
     torch.random.manual_seed(args.seed)
 
     device = torch.device("cuda" if args.cuda else "cpu")
+
+    # Scaling the gradient is important to prevent underflow.
+    scaler = GradScaler(enabled=args.fp16)
 
     transform = transforms.Compose([
         transforms.RandomResizedCrop(224, ratio=(1, 1.3)),
@@ -82,12 +97,11 @@ def main(args):
         images, labels = batch
         images = images.to(device)
         labels = labels.to(device)
-        logits = model(images)
-        loss = nn.CrossEntropyLoss()(logits, labels)
 
-        opt.zero_grad()
-        loss.backward()
-        opt.step()
+        with autocast(enabled=args.fp16):
+            logits = model(images)
+            loss = nn.CrossEntropyLoss()(logits, labels)
+        scaler.scale(loss / train_config.get('accum_steps', 1)).backward()
 
         correct = (logits.max(-1)[1] == labels).sum().item()
         total = labels.shape[-1]
@@ -104,6 +118,13 @@ def main(args):
     @trainer.on(Events.STARTED)
     def start_training(engine):
         print('Training started!')
+
+    @trainer.on(Events.EPOCH_COMPLETED)
+    @trainer.on(Events.ITERATION_COMPLETED(every=train_config.get('accum_steps', 1)))
+    def train_update(engine):
+        scaler.unscale_(opt)
+        scaler.step(opt)
+        opt.zero_grad()
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def log_train(engine):
@@ -199,6 +220,7 @@ if __name__ == '__main__':
     parser.add_argument('--eval_data_config', default=None, type=str)
     parser.add_argument('--seed', default=11, type=int)
     parser.add_argument('--cuda', action='store_true', help='If True, run on GPU.')
+    parser.add_argument('--fp16', action='store_true', help='If True, then use half precision.')
     parser.add_argument('--progress', action='store_true', help='If True, show progress bar.')
     parser.add_argument('--preset', default=None, type=str)
     args = parser.parse_args()
